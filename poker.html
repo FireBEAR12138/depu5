@@ -1579,6 +1579,11 @@
                             '过嘛过嘛，莫急！',
                             '稳住稳住，慢慢来！',
                             '看你们啷个耍！'
+                        ],
+                        'allin': [
+                            '老子梭哈了！有种跟到底！',
+                            '全部押上，就干到底！',
+                            '看老子这次豁出去了！'
                         ]
                     },
                     'conservative': {
@@ -1601,6 +1606,11 @@
                             '稳住稳住，莫慌！',
                             '过牌，看你们咋个耍！',
                             '慢慢来，莫急！'
+                        ],
+                        'allin': [
+                            '这把值得梭哈！',
+                            '破釜沉舟，全部押上！',
+                            '豁出去了，全下！'
                         ]
                     },
                     'tricky': {
@@ -1623,6 +1633,11 @@
                             '先过着，莫要着急！',
                             '看你们啷个耍嘛！',
                             '慢慢来，有的是时间！'
+                        ],
+                        'allin': [
+                            '要得，老子梭哈了！',
+                            '全部押上，你们敢不敢？',
+                            '看我这次玩这么大！'
                         ]
                     }
                 };
@@ -1661,6 +1676,16 @@
                         this.pot += raiseAmount;
                         player.chips -= raiseAmount;
                         this.currentBet = player.currentBet = raiseAmount;
+                        soundManager.playChips();
+                        break;
+                    case 'allin':
+                        const allinAmount = player.chips;
+                        this.pot += allinAmount;
+                        player.chips = 0;
+                        player.currentBet += allinAmount;
+                        if (player.currentBet > this.currentBet) {
+                            this.currentBet = player.currentBet;
+                        }
                         soundManager.playChips();
                         break;
                 }
@@ -1725,6 +1750,21 @@
                     `;
                 }
 
+                // 检查游戏是否结束
+                const gameOverStatus = this.checkGameOver();
+                if (gameOverStatus.isOver) {
+                    result += `
+                        <div class="game-over-info" style="margin: 20px 0; padding: 20px; background: rgba(255,0,0,0.1); border-radius: 10px;">
+                            <h3 style="color: #ff4444; margin-bottom: 10px;">游戏结束</h3>
+                            <div>最终获胜者: ${gameOverStatus.winner.name}</div>
+                            <div>获胜筹码: ${gameOverStatus.winner.chips}</div>
+                            <div style="margin-top: 10px;">
+                                破产玩家: ${gameOverStatus.bankruptPlayers.map(p => p.name).join(', ')}
+                            </div>
+                        </div>
+                    `;
+                }
+
                 result += '<div class="game-summary">';
                 this.players.forEach(player => {
                     const isWinner = player === winner;
@@ -1765,7 +1805,7 @@
 
                 result += `
                     <div class="modal-buttons">
-                        ${this.checkGameOver() ? 
+                        ${gameOverStatus.isOver ? 
                             `<button onclick="restartGame()">重新开始</button>` :
                             `<button onclick="continueGame()">继续游戏</button>`
                         }
@@ -1776,10 +1816,15 @@
                 const overlay = document.querySelector('.modal-overlay');
                 
                 modal.innerHTML = result;
-                overlay.style.display = 'block';
                 modal.style.display = 'block';
+                overlay.style.display = 'block';
                 
                 soundManager.playWin();
+
+                // 如果游戏结束，阻止继续游戏
+                if (gameOverStatus.isOver) {
+                    this.gameOver = true;
+                }
             }
 
             updateUI() {
@@ -1893,9 +1938,17 @@
                 const bankruptPlayers = this.players.filter(p => p.chips <= 0);
                 if (bankruptPlayers.length > 0) {
                     this.gameOver = true;
-                    return true;
+                    // 找出获胜者（筹码最多的玩家）
+                    const winner = this.players.reduce((prev, current) => 
+                        (prev.chips > current.chips) ? prev : current
+                    );
+                    return {
+                        isOver: true,
+                        winner: winner,
+                        bankruptPlayers: bankruptPlayers
+                    };
                 }
-                return false;
+                return { isOver: false };
             }
 
             showCoffeeModal() {
@@ -1930,6 +1983,10 @@
             }
 
             async continueGame() {
+                if (this.gameOver) {
+                    return;
+                }
+
                 this.round++;
 
                 // 检查是否需要显示咖啡弹窗
@@ -1962,6 +2019,28 @@
                 const controls = document.getElementById('controls');
                 if (this.currentPlayer === 0 && !this.players[0].folded) {
                     controls.classList.add('active');
+                    
+                    const player = this.players[0];
+                    const callAmount = this.currentBet - player.currentBet;
+                    const raiseAmount = Math.min(
+                        player.chips,
+                        this.currentBet + this.smallBlind * 2
+                    );
+                    
+                    // 如果玩家筹码不够跟注，只显示 allin 和弃牌选项
+                    if (callAmount >= player.chips) {
+                        controls.innerHTML = `
+                            <button onclick="playerAction('fold')">弃牌</button>
+                            <button onclick="playerAction('allin')" style="background: linear-gradient(145deg, #ff9800, #f57c00);">全下 ${player.chips}</button>
+                        `;
+                    } else {
+                        controls.innerHTML = `
+                            <button onclick="playerAction('fold')">弃牌</button>
+                            <button onclick="playerAction('call')">${callAmount === 0 ? '过牌' : '跟注 ' + callAmount}</button>
+                            <button onclick="playerAction('raise')">加注 ${raiseAmount}</button>
+                            <button onclick="playerAction('allin')" style="background: linear-gradient(145deg, #ff9800, #f57c00);">全下 ${player.chips}</button>
+                        `;
+                    }
                 } else {
                     controls.classList.remove('active');
                 }
@@ -1999,6 +2078,16 @@
             }
 
             switch (action) {
+                case 'allin':
+                    const allinAmount = player.chips;
+                    game.pot += allinAmount;
+                    player.chips = 0;
+                    player.currentBet += allinAmount;
+                    if (player.currentBet > game.currentBet) {
+                        game.currentBet = player.currentBet;
+                    }
+                    soundManager.playChips();
+                    break;
                 case 'fold':
                     player.folded = true;
                     soundManager.playFold();
@@ -2035,6 +2124,7 @@
             document.getElementById('start-screen').style.display = 'flex';
             document.getElementById('result-modal').style.display = 'none';
             document.querySelector('.modal-overlay').style.display = 'none';
+            game = null; // 清除当前游戏实例
         }
 
         // 添加关闭咖啡弹窗的函数
